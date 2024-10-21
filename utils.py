@@ -1,46 +1,56 @@
-import streamlit as st
-from utils import StockFetch
+import requests
+import pandas as pd 
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Stock Price Project", page_icon="📈")
+class StockFetch:
 
-@st.cache_resource
-def get_stock_client(api_key):
-    return StockFetch(api_key = api_key)
+    def __init__(self, api_key) -> None:
+        self.api_key = api_key
+        self.url = "https://alpha-vantage.p.rapidapi.com/query"
+        self.headers = {
+            "x-rapidapi-key": self.api_key, 
+            "x-rapidapi-host": "alpha-vantage.p.rapidapi.com"
+        }
 
-api_key = st.secrets["API_KEY"]
-client = get_stock_client(api_key)
+    def symbol_search(self, company):
+        querystring = {
+            "datatype": "json",
+            "keywords": company,
+            "function": "SYMBOL_SEARCH",
+        }
+        response = requests.get(self.url, headers=self.headers, params=querystring)
+        data = response.json()["bestMatches"]
+        dct = {}
+        for i in data:
+            symbol = i["1. symbol"]
+            dct[symbol] = [i["2. name"], i["3. type"], i["4. region"]]
+        return dct
+    
+    def daily_data(self, symbol):
+        querystring = {
+            "function":"TIME_SERIES_DAILY",
+            "symbol":symbol,
+            "outputsize":"compact",
+            "datatype":"json"
+        }
+        response = requests.get(self.url, headers=self.headers, params=querystring)
+        df = pd.DataFrame(response.json()["Time Series (Daily)"]).T
+        df.index = pd.to_datetime(df.index)
+        for i in df.columns:
+            df[i] = df[i].astype(float)
 
-@st.cache_data(ttl=3600)
-def search_stock(company):
-    return client.symbol_search(company)
-
-@st.cache_data(ttl=3600)
-def plot_chart(symbol):
-    return client.plot_chart(symbol)
-
-if __name__ == "__main__":
-    # Adding title to the app
-    st.title("Stock Project Streamlit")
-
-    # Add subheading below
-    st.subheader("By Hiral Mistry")
-
-    # Take company as text input from user
-    company = st.text_input("Please provide company : ")
-
-    # After pressing enter by giving company name
-    if company:
-        search_data = search_stock(company)
-        if search_data:
-            options = st.selectbox("Select the Company Symbol", list(search_data.keys()))
-            symbol_data = search_data.get(options)
-            st.success(f"Company Name : {symbol_data[0]}")
-            st.success(f"Type : {symbol_data[1]}")
-            st.success(f"Region : {symbol_data[2]}")
-
-            if st.button("Submit"):
-                fig = plot_chart(symbol= options)
-                st.plotly_chart(fig)
-        
-        else:
-            st.error("Company name not found")
+        return df 
+    
+    def plot_chart(self, symbol):
+        df = self.daily_data(symbol)
+        fig = go.Figure(data=[
+            go.Candlestick(
+                x = df.index,
+                open = df["1. open"],
+                high = df["2. high"],
+                low = df["3. low"],
+                close = df["4. close"]
+            )
+        ])
+        fig.update_layout(width=1000, height=800)
+        return fig
